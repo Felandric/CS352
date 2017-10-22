@@ -9,7 +9,19 @@ import sys
 # and received from
 
 def init(UDPportTx,UDPportRx):   # initialize your UDP socket here 
-    pass 
+    global Tx
+    global Rx
+    global Txport
+    global Rxport
+    if UDPportRx == 0:
+        UDPportRx = 27182
+    if UDPportTx == 0:
+        UDPportTx = 27182
+    Txport = UDPportTx
+    Rxport = UDPportRx
+    Tx = syssock.socket(syssock.AF_INET, syssock.SOCK_DGRAM)
+    Rx = syssock.socket(syssock.AF_INET, syssock.SOCK_DGRAM)
+     
     
 class socket:
     
@@ -17,9 +29,13 @@ class socket:
         return
     
     def bind(self,address):
+        Tx.bind(address, Txport)
+        Rx.bind(address, Rxport)
         return 
 
     def connect(self,address):  # fill in your code here 
+        Tx.connect(address)
+        Rx.connect(address)
         return 
     
     def listen(self,backlog):
