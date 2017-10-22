@@ -19,41 +19,42 @@ def init(UDPportTx,UDPportRx):   # initialize your UDP socket here
         UDPportTx = 27182
     Txport = UDPportTx
     Rxport = UDPportRx
-    Tx = syssock.socket(syssock.AF_INET, syssock.SOCK_DGRAM)
-    Rx = syssock.socket(syssock.AF_INET, syssock.SOCK_DGRAM)
      
     
 class socket:
     
     def __init__(self):  # fill in your code here 
+        self.sock = syssock.socket(syssock.AF_INET, syssock.SOCK_DGRAM)
         return
     
-    def bind(self,address):
-        Tx.bind(address, Txport)
-        Rx.bind(address, Rxport)
+    def bind(self,address): #server
+        print(address[0], Rxport)
+        self.sock.bind((address[0], int(Rxport)))
         return 
 
-    def connect(self,address):  # fill in your code here 
-        Tx.connect(address)
-        Rx.connect(address)
+    def connect(self,address):  #client # fill in your code here 
+
+        self.sock.connect((address[0], Txport))
         return 
     
-    def listen(self,backlog):
+    def listen(self,backlog): #server
+        self.sock.listen(backlog)
         return
 
-    def accept(self):
-        (clientsocket, address) = (1,1)  # change this to your code 
-        return (clientsocket,address)
+    def accept(self): #server 
+        (clientsocket, address) = self.sock.accept()  # change this to your code 
+        return (clientsocket, address)
     
-    def close(self):   # fill in your code here 
+    def close(self):   # fill in your code here
+        self.sock.close()
         return 
 
-    def send(self,buffer):
-        bytessent = 0     # fill in your code here 
+    def send(self,buffer): #client
+        bytessent = self.sock.send(buffer)     # fill in your code here 
         return bytesent 
 
-    def recv(self,nbytes):
-        bytesreceived = 0     # fill in your code here
+    def recv(self,nbytes): #server
+        bytesreceived = self.sock.recv(nbytes)     # fill in your code here
         return bytesreceived 
 
 
