@@ -1,3 +1,3 @@
-import sock352
-sock352.init(1,2)
-sock352.socket()
+import sys
+x=0,y=0,z=0
+print(2**64)
