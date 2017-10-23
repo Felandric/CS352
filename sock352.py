@@ -61,7 +61,8 @@ class socket:
         return 
     
     def listen(self,backlog): #server should receive info about client address&port, then 
-        self.sock.recv(512)
+        header_len = struct.calcsize('!BBBBHHLLQQLL')
+        self.sock.recv(header_len)
         return
 
     def accept(self): #server 
