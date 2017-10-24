@@ -16,32 +16,33 @@ SOCK352_RESET = 0x08
 SOCK352_HAS_OPT = 0xA0
 
 
-def init(udp_port1, udp_port2):   # initialize your UDP socket here
-    global Txport
-    global Rxport
-    if udp_port2 == 0:
-        udp_port2 = 27182
-    if udp_port1 == 0:
-        udp_port1 = 27182
-    Txport = udp_port1
-    Rxport = udp_port2
-     
-    
+def init(udpportTx, udpportRx):
+    global Txport                 # transmission port
+    global Rxport                 # receiving port
+
+    # when arguments are set to 0, use default port number
+    if udpportRx == 0:
+        udpportRx = 27182
+    if udpportTx == 0:
+        udpportTx = 27182
+
+    Txport = udpportTx
+    Rxport = udpportRx
+
 class socket:
-    
+
     def __init__(self):
-        self.sock = syssock.socket(syssock.AF_INET, syssock.SOCK_DGRAM)
+        self.sock = syssock.socket(syssock.AF_INET, syssock.SOCK_DGRAM) # defines underlying UDP socket for the protocol
         return
     
-    def bind(self, address):  # server, address = (IP address, port number)
-        print(address[0], Rxport)
-        self.sock.bind((address[0], int(Rxport)))
+    def bind(self, address):  # server call, address is a 2-tuple of (IP address, port number)
+        # print(address[0], Rxport)
+        self.sock.bind((address[0], int(Rxport)))   # establish receiving port
         return
 
-    def connect(self, address):  # client, address = (IP address, port number)
+    def connect(self, address):  # client call, address is a 2-tuple of (IP address, port number)
         self.sock.bind(('', int(Txport)))
-        
-        sock352PktHdrData = '!BBBBHHLLQQLL'
+        sock352PktHdrData = '!BBBBHHLLQQLL' # defines format of packet header data
         udpPkt_hdr_data = struct.Struct(sock352PktHdrData)
         version = 0x1
         flags = SOCK352_SYN
@@ -54,7 +55,7 @@ class socket:
         window = 0
         header_len = struct.calcsize('!BBBBHHLLQQLL')
         payload_len = 0
-        sequence_no = random.randint(1, sys.maxint)  # REEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE
+        sequence_no = random.randint(1, sys.maxint)
         header = udpPkt_hdr_data.pack(version, flags, opt_ptr, protocol, header_len, checksum, source_port, dest_port, sequence_no, ack_no, window, payload_len)
         
         self.sock.sendto(header, (address[0], int(Rxport)))
