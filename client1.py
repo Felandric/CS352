@@ -2,8 +2,7 @@
 
 # This is the CS 352 Spring 2017 Client for the 1st programming
 # project
-
-
+ 
 
 import argparse
 import time
@@ -13,20 +12,20 @@ import os
 import sock352
 
 def main():
-    
     # parse all the arguments to the client 
-    parser = argparse.ArgumentParser(description='CS 352 Socket Server')
-    parser.add_argument('-f','--filename', help='Filename to Receiver', required=False)
-    parser.add_argument('-p','--port', help='CS 352 Socket Port (optional for part 1)', required=False)
+    parser = argparse.ArgumentParser(description='CS 352 Socket Client')
+    parser.add_argument('-f','--filename', help='File to Send', required=False)
+    parser.add_argument('-d','--destination', help='Destination IP Host', required=True)
+    parser.add_argument('-p','--port', help='remote sock352 port', required=False)
     parser.add_argument('-u','--udpportRx', help='UDP port to use for receiving', required=True)
     parser.add_argument('-v','--udpportTx', help='UDP port to use for sending', required=False)
 
+    # get the arguments into local variables 
     args = vars(parser.parse_args())
-
-    # open the file for writing
     filename = args['filename']
+    destination = args['destination']
     udpportRx = args['udpportRx']
-    
+
     if (args['udpportTx']):
         udpportTx = args['udpportTx']
     else:
@@ -37,10 +36,12 @@ def main():
         port = args['port']
     else:
         port = 1111 
-    
+
+    # open the file for reading
     if (filename):
         try: 
-            fd = open(filename, "wb")
+            filesize = os.path.getsize(filename)
+            fd = open(filename, "rb")
             usefile = True
         except:
             print ( "error opening file: %s" % (filename))
@@ -49,83 +50,75 @@ def main():
         pass 
 
     # This is where we set the transmit and receive
-    # ports the server uses for the underlying UDP
+    # ports the client uses for the underlying UDP
     # sockets. If we are running the client and
-    # server on different machines, these ports
-    # need to be different, otherwise we can
-    # use the same ports
+    # server on the same machine, these ports
+    # need to be different. If they are running on
+    # different machines, we can re-use the same
+    # ports. 
     if (udpportTx):
         sock352.init(udpportTx,udpportRx)
     else:
         sock352.init(udpportRx,udpportRx)
 
+    # create a socket and connect to the remote server
     s = sock352.socket()
-
-    # set the fragment size we will read on 
-    FRAGMENTSIZE = 4096
-
-    # binding the host to empty allows reception on
-    # all network interfaces
-    s.bind(('',port))
-    s.listen(5)
-
-    # when accept returns, the client is connected 
-    (s2,address) = s.accept() 
-
-    # this receives the size of the file
-    # as a 4 byte integer in network byte order (big endian)
+    s.connect((destination,port))
+    
+    # send the size of the file as a 4 byte integer
+    # to the server, so it knows how much to read
+    FRAGMENTSIZE = 8192
     longPacker = struct.Struct("!L")
-    long = s2.recv(4)
-    fn = longPacker.unpack(long)
-    filelen = fn[0]
+    fileLenPacked = longPacker.pack(filesize);
+    s.send(fileLenPacked)
 
-    # the MD5 computes a unique hash for all the data 
+    # use the MD5 hash algorithm to validate all the data is correct
     mdhash = md5.new()
 
-    bytes_to_receive = filelen
-    start_stamp = time.clock()
+    # loop for the size of the file, sending the fragments 
+    bytes_to_send = filesize
 
-    # main loop to receive the data from the client 
-    while (bytes_to_receive > 0):
-        if (bytes_to_receive >= FRAGMENTSIZE): 
-            fragment = s2.recv(FRAGMENTSIZE)
-        else: 
-            fragment = s2.recv(bytes_to_receive)
-
+    start_stamp = time.clock()    
+    while (bytes_to_send > 0):
+        fragment = fd.read(FRAGMENTSIZE)
         mdhash.update(fragment)
-        bytes_to_receive = bytes_to_receive - len(fragment)
-        fd.write(fragment)
+        totalsent = 0
+        # make sure we sent the whole fragment 
+        while (totalsent < len(fragment)):
+            sent = s.send(fragment[totalsent:])
+            if (sent == 0):
+                raise RuntimeError("socket broken")
+            totalsent = totalsent + sent
+        bytes_to_send = bytes_to_send - len(fragment)
 
     end_stamp = time.clock() 
     lapsed_seconds = end_stamp - start_stamp
-
-    # finish computing the MD5 hash 
-    local_digest = mdhash.digest()
     
-    # receive the size of the remote hash 
-    dl = longPacker.unpack(s2.recv(4))
-    digestlen = dl[0]
-    remote_digest = s2.recv(digestlen)
-
-    # check is the size matches 
-    if (len(remote_digest) != digestlen):
-        raise RuntimeError("socket error")
+    # this part send the lenght of the digest, then the
+    # digest. It will be check on the server 
     
-    # compare the two digests, byte for byte 
-    for i, server_byte in enumerate(local_digest):
-        client_byte = remote_digest[i]
-        if (client_byte != server_byte):
-            print( "digest failed at byte %d %c %c " % (i,client_byte,server_byte))
+    digest = mdhash.digest()
+    # send the length of the digest
+    long = len(digest)
+    digestLenPacked = longPacker.pack(long)
+    sent = s.send(digestLenPacked)
+    if (sent != 4):
+        raise RuntimeError("socket broken")
+    
+    # send the digest 
+    sent = s.send(digest)
+    if (sent != len(digest)):
+        raise RuntimeError("socket broken")
 
     if (lapsed_seconds > 0.0):
-        print ("server1: received %d bytes in %0.6f seconds, %0.6f MB/s " % (filelen, lapsed_seconds,
-(filelen/lapsed_seconds)/(1024*1024)))
+        print ("client1: sent %d bytes in %0.6f seconds, %0.6f MB/s " % (filesize, lapsed_seconds,
+(filesize/lapsed_seconds)/(1024*1024)))
     else:
-        print ("server1: received %d bytes in %d seconds, inf MB/s " % (filelen, lapsed_seconds))
-    fd.close()
-    s2.close()
-    
+        print ("client1: sent %d bytes in %d seconds, inf MB/s " % (filesize, lapsed_seconds))        
 
-# create a main function in Python
+    fd.close()
+    s.close()
+# this gives a main function in Python
 if __name__ == "__main__":
     main()
+
