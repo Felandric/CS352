@@ -73,13 +73,13 @@ class socket:
         SYN_Packet = self.udpPkt_hdr_data.pack(version, flags, opt_ptr, protocol, header_len, checksum, source_port,
                                                dest_port, sequence_no, ack_no, window, payload_len)
         self.sock.sendto(SYN_Packet, self.serv_addr)
-        # print("Connection request sent")
+        print("Connection request sent")
 
         # TODO Start Timeout
 
         # Receive SYN ACK (B)
         self.last_pkt_recvd = struct.unpack('!BBBBHHLLQQLL', self.sock.recvfrom(header_len)[0])
-        # print("Server response received")
+        print("Server response received")
         if self.last_pkt_recvd [1] == SOCK352_RESET:
             print("Connection Refused")
         elif self.last_pkt_recvd [1] == SOCK352_SYN | SOCK352_ACK:
@@ -121,7 +121,7 @@ class socket:
         connection_response = self.udpPkt_hdr_data.pack(version, flags, opt_ptr, protocol, header_len, checksum,
                                                         source_port, dest_port, sequence_no, ack_no, window, payload_len)
         self.sock.sendto(connection_response, self.client_addr)  # send initial packet over the connection
-        # print("Server response sent")
+        print("Server response sent")
         return self, self.client_addr
 
     def close(self):
@@ -145,7 +145,7 @@ class socket:
             self.sock.sendto(connection_response, self.client_addr)
         elif self.amServer == False:
             self.sock.sendto(connection_response, self.serv_addr)
-        # print("Termination request sent")
+        print("Termination request sent")
 
         #TODO start timeout
 
@@ -192,7 +192,7 @@ class socket:
 
         #TODO implement timers
 
-        return bytessent
+        return bytessent-40 # subtract header size
 
     def recv(self, nbytes):  # TODO implement fragmentation handling
         header_len = struct.calcsize('!BBBBHHLLQQLL')
@@ -223,7 +223,7 @@ class socket:
             ACK = self.sock.sendto(ACK, self.client_addr)
         elif self.amServer == False:
             ACK = self.sock.sendto(ACK, self.serv_addr)
-        # print("%i byte payload received. Sending ACK..." % nbytes)
+        print("%i byte payload received. Sending ACK..." % nbytes)
 
         # TODO implement timers
         return payload

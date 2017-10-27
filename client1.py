@@ -102,6 +102,7 @@ def main():
     long = len(digest)
     digestLenPacked = longPacker.pack(long)
     sent = s.send(digestLenPacked)
+
     if (sent != 4):
         raise RuntimeError("socket broken")
     
