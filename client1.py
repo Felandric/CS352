@@ -69,7 +69,7 @@ def main():
     # to the server, so it knows how much to read
     FRAGMENTSIZE = 8192
     longPacker = struct.Struct("!L")
-    fileLenPacked = longPacker.pack(filesize);
+    fileLenPacked = longPacker.pack(filesize)
     s.send(fileLenPacked)
 
     # use the MD5 hash algorithm to validate all the data is correct
