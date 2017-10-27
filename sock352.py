@@ -33,7 +33,7 @@ class socket:
 
     def __init__(self):
         self.sock = syssock.socket(syssock.AF_INET, syssock.SOCK_DGRAM)
-        self.sock.settimeout(0.2)
+        # self.sock.settimeout(0.2)
         self.client_addr = None
         self.serv_addr = None
         self.last_pkt_recvd = None
@@ -47,74 +47,75 @@ class socket:
         return
 
     def connect(self, address):     # client call, address is a 2-tuple of (IP address, port number)
+        # Call Bind()
         self.serv_addr = (address[0], int(Rxport))
         self.sock.bind(('', int(Txport)))
-        self
-        # define header fields for initial connection request
+
+        # Create SYN Header
         version = 0x1
         flags = SOCK352_SYN
         opt_ptr = 0
-        protocol = 0 
-        checksum = 0 
+        protocol = 0
+        header_len = struct.calcsize('!BBBBHHLLQQLL')
+        checksum = 0
         source_port = 0
         dest_port = 0
+        sequence_no = random.randint(1, sys.maxint)
         ack_no = 0
         window = 0
-        header_len = struct.calcsize('!BBBBHHLLQQLL')
         payload_len = 0
-        sequence_no = random.randint(1, sys.maxint)
 
-        # send client connection request
-        client_request = self.udpPkt_hdr_data.pack(version, flags, opt_ptr, protocol, header_len, checksum, source_port,
-                                           dest_port, sequence_no, ack_no, window, payload_len)
-        self.sock.sendto(client_request, serv_addr)
+        # Send SYN Packet (A)
+        SYN_Packet = self.udpPkt_hdr_data.pack(version, flags, opt_ptr, protocol, header_len, checksum, source_port,
+                                               dest_port, sequence_no, ack_no, window, payload_len)
+        self.sock.sendto(SYN_Packet, self.serv_addr)
+        print("Connection request sent")
 
-        # receive server response
-        server_response = struct.unpack('!BBBBHHLLQQLL', self.sock.recvfrom(header_len))
-        if server_response[1] == SOCK352_RESET:
-            print("Connection Refused\n")
-        elif server_response == SOCK352_SYN | SOCK352_ACK:
-            print("Connection Successful\n")
+        # TODO Start Timeout
+
+        # Receive SYN ACK (B)
+        SYN_ACK = struct.unpack('!BBBBHHLLQQLL', self.sock.recvfrom(header_len)[0])
+        print("Server response received")
+        if SYN_ACK[1] == SOCK352_RESET:
+            print("Connection Refused")
+        elif SYN_ACK[1] == SOCK352_SYN | SOCK352_ACK:
+            print("Connection Successful")
         else:
-            print("Server response invalid\n")
-
+            print("Server response invalid")
         return 
     
-    def listen(self, backlog):  # server call, receives initial packet
-        header_len = struct.calcsize('!BBBBHHLLQQLL')
-
-        # returns a 2-tuple of received string, and address-port pair
-        init_packet, self.client_addr = self.sock.recvfrom(header_len)
-        self.last_pkt_recvd = struct.unpack('!BBBBHHLLQQLL', init_packet)
+    def listen(self, backlog):  # server call
         return
 
     def accept(self):  # server call
+        # Receive the SYN Packet (A)
+        header_len = struct.calcsize('!BBBBHHLLQQLL')
+        SYN_Packet, self.client_addr = self.sock.recvfrom(int(header_len))
+        self.last_pkt_recvd = struct.unpack('!BBBBHHLLQQLL', SYN_Packet)
+        print("Connection request received")
 
-        # define header fields for connection response packet
+        # Send SYN ACK (B)
         version = 0x1
         flags = 0
-
         if self.isConnected:
             flags = SOCK352_RESET
         else:
             flags = SOCK352_SYN | SOCK352_ACK
             self.isConnected = True
-
         opt_ptr = 0
         protocol = 0
+        header_len = struct.calcsize('!BBBBHHLLQQLL')
         checksum = 0
         source_port = 0
         dest_port = 0
+        sequence_no = self.last_pkt_recvd[8] + 1
         ack_no = 0
         window = 0
-        header_len = struct.calcsize('!BBBBHHLLQQLL')
         payload_len = 0
-        sequence_no = self.last_pkt_recvd[8] + 1
-
-        # packs header data into a string suitable to be sent over transmitting socket
         connection_response = self.udpPkt_hdr_data.pack(version, flags, opt_ptr, protocol, header_len, checksum,
                                                     source_port, dest_port, sequence_no, ack_no, window, payload_len)
         self.sock.sendto(connection_response, self.client_addr)  # send initial packet over the connection
+        print("Server response sent")
         return self, self.client_addr
     
     def close(self):
@@ -122,7 +123,9 @@ class socket:
         return 
 
     def send(self, buffer): # TODO
-        if len(buffer) < 64000: #small send
+        if len(buffer) < 64000: #smol send
+            version = 0x1
+            flags = 0
             opt_ptr = 0
             protocol = 0
             checksum = 0
