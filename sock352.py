@@ -16,7 +16,6 @@ SOCK352_ACK = 0x04
 SOCK352_RESET = 0x08
 SOCK352_HAS_OPT = 0xA0
 
-
 def init(udpportTx, udpportRx):
     global Txport                 # transmitting port
     global Rxport                 # receiving port
@@ -41,7 +40,6 @@ class socket:
         self.isConnected = False
         self.udpPkt_hdr_data = struct.Struct('!BBBBHHLLQQLL')
         self.amServer = None
-
         return
 
     def bind(self, address):    # server call, address is a 2-tuple of (IP address, port number)
@@ -159,7 +157,7 @@ class socket:
             print("Server response invalid")
         return
 
-    def send(self, buffer): # TODO implement fragmentation handling
+    def send(self, buffer):
         version = 0x1
         flags = 0
         opt_ptr = 0
@@ -173,24 +171,37 @@ class socket:
         window = 0
         payload_len = len(buffer)
 
-        # packs header data into a string suitable to be sent over transmitting socket
-        header = self.udpPkt_hdr_data.pack(version, flags, opt_ptr, protocol, header_len, checksum,
-                                           source_port, dest_port, sequence_no, ack_no, window, payload_len)
+        MTU = 64000 + header_len
+        bytes_to_send = len(buffer)
+        bytessent = 0
 
-        if self.amServer == True:
-            bytessent = self.sock.sendto((header + buffer), self.client_addr)
-        elif self.amServer == False:
-            bytessent = self.sock.sendto((header + buffer), self.serv_addr)
-        print("%i byte payload sent. Awaiting ACK..." % len(buffer))
+        if len(buffer) <= MTU:
+            # packs header data into a string suitable to be sent over transmitting socket
+            header = self.udpPkt_hdr_data.pack(version, flags, opt_ptr, protocol, header_len, checksum,
+                                               source_port, dest_port, sequence_no, ack_no, window, payload_len)
 
-        # receive ACK
-        ACK = struct.unpack('!BBBBHHLLQQLL', self.sock.recvfrom(header_len)[0])
-        if (ACK[1] == SOCK352_ACK) & (ACK[9] == sequence_no):
-            print("ACK received")
-        else:
-            print("Response invalid")
+            if self.amServer == True:
+                bytessent = self.sock.sendto((header + buffer), self.client_addr)
+            elif self.amServer == False:
+                bytessent = self.sock.sendto((header + buffer), self.serv_addr)
+            print("%i byte payload sent. Awaiting ACK..." % len(buffer))
 
-        #TODO implement timers
+            # receive ACK
+            ACK = struct.unpack('!BBBBHHLLQQLL', self.sock.recvfrom(header_len)[0])
+            if (ACK[1] == SOCK352_ACK) & (ACK[9] == sequence_no):
+                print("ACK received")
+            else:
+                print("Response invalid")
+
+            #TODO implement timers
+
+        else: # this is very easy when done with recursion but does it screw up the sequence numbers?
+            payload_len = len(buffer) % MTU
+            bytessent = bytessent + self.send(buffer[:payload_len])
+            payload_len = MTU - header_len
+            while bytes_to_send > 0:
+                bytessent = bytessent + self.send(buffer[bytessent:bytessent+payload_len])
+                bytes_to_send = bytes_to_send - payload_len
 
         return bytessent-40 # subtract header size
 
