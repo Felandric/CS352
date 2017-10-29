@@ -16,6 +16,8 @@ SOCK352_ACK = 0x04
 SOCK352_RESET = 0x08
 SOCK352_HAS_OPT = 0xA0
 
+MTU = 64000
+
 def init(udpportTx, udpportRx):
     global Txport                 # transmitting port
     global Rxport                 # receiving port
@@ -33,7 +35,6 @@ class socket:
 
     def __init__(self):
         self.sock = syssock.socket(syssock.AF_INET, syssock.SOCK_DGRAM)
-        # self.sock.settimeout(0.2)
         self.client_addr = None
         self.serv_addr = None
         self.last_pkt_recvd = None
@@ -48,7 +49,8 @@ class socket:
 
     def connect(self, address):     # client call, address is a 2-tuple of (IP address, port number)
         self.amServer = False
-
+        self.sock.settimeout(0.2)
+                
         # Call Bind()
         self.serv_addr = (address[0], int(Rxport))
         self.sock.bind(('', int(Txport)))
@@ -70,13 +72,21 @@ class socket:
         # Send SYN Packet (A)
         SYN_Packet = self.udpPkt_hdr_data.pack(version, flags, opt_ptr, protocol, header_len, checksum, source_port,
                                                dest_port, sequence_no, ack_no, window, payload_len)
-        self.sock.sendto(SYN_Packet, self.serv_addr)
-        print("Connection request sent")
-
-        # TODO Start Timeout
-
+        
+        # resend request if timeout occurs while waiting for ack
+        acked = False
+        while not acked:
+            try:
+                self.sock.sendto(SYN_Packet, self.serv_addr)
+                print("Connection request sent")
+                ack = self.sock.recvfrom(header_len)[0]
+                acked = True
+            except syssock.timeout:
+                print("Timeout occurred. Resending...")
+                pass
+        
         # Receive SYN ACK (B)
-        self.last_pkt_recvd = struct.unpack('!BBBBHHLLQQLL', self.sock.recvfrom(header_len)[0])
+        self.last_pkt_recvd = struct.unpack('!BBBBHHLLQQLL', ack)
         print("Server response received")
         if self.last_pkt_recvd [1] == SOCK352_RESET:
             print("Connection Refused")
@@ -91,10 +101,13 @@ class socket:
 
     def accept(self):  # server call
         self.amServer = True
-
+        self.sock.settimeout(None)
+        
         # Receive the SYN Packet (A)
         header_len = struct.calcsize('!BBBBHHLLQQLL')
+        
         SYN_Packet, self.client_addr = self.sock.recvfrom(int(header_len))
+
         self.last_pkt_recvd = struct.unpack('!BBBBHHLLQQLL', SYN_Packet)
         print("Connection request received")
 
@@ -171,7 +184,7 @@ class socket:
         window = 0
         payload_len = len(buffer)
 
-        MTU = 64000 + header_len
+        
         bytes_to_send = len(buffer)
         bytessent = 0
 
@@ -180,15 +193,25 @@ class socket:
             header = self.udpPkt_hdr_data.pack(version, flags, opt_ptr, protocol, header_len, checksum,
                                                source_port, dest_port, sequence_no, ack_no, window, payload_len)
 
-            if self.amServer == True:
-                bytessent = self.sock.sendto((header + buffer), self.client_addr)
-            elif self.amServer == False:
-                bytessent = self.sock.sendto((header + buffer), self.serv_addr)
-            print("%i byte payload sent. Awaiting ACK..." % len(buffer))
+                                               
+            # resend packets if timeout occurs while waiting for ack
+            acked = False
+            while not acked:
+                try:
+                    if self.amServer == True:
+                        bytessent = self.sock.sendto((header + buffer), self.client_addr)
+                    elif self.amServer == False:
+                        bytessent = self.sock.sendto((header + buffer), self.serv_addr)
+                    print("%i byte payload sent. SEQNO = %d. Awaiting ACK..." % (len(buffer), sequence_no))
+                    ack = self.sock.recvfrom(header_len)[0]
+                    acked = True
+                except syssock.timeout:
+                    print("Timeout occurred. Resending...")
+                    pass
 
             # receive ACK
-            ACK = struct.unpack('!BBBBHHLLQQLL', self.sock.recvfrom(header_len)[0])
-            if (ACK[1] == SOCK352_ACK) & (ACK[9] == sequence_no):
+            self.last_pkt_recvd = struct.unpack('!BBBBHHLLQQLL', ack)
+            if (self.last_pkt_recvd[1] == SOCK352_ACK) and (self.last_pkt_recvd[9] == sequence_no):
                 print("ACK received")
             else:
                 print("Response invalid")
@@ -198,18 +221,18 @@ class socket:
         else: # this is very easy when done with recursion but does it screw up the sequence numbers?
             payload_len = len(buffer) % MTU
             bytessent = bytessent + self.send(buffer[:payload_len])
-            payload_len = MTU - header_len
+            payload_len = MTU
             while bytes_to_send > 0:
                 bytessent = bytessent + self.send(buffer[bytessent:bytessent+payload_len])
                 bytes_to_send = bytes_to_send - payload_len
 
-        return bytessent-40 # subtract header size
+        return bytessent-header_len # subtract header size
 
     def recv(self, nbytes):  # TODO implement fragmentation handling
         header_len = struct.calcsize('!BBBBHHLLQQLL')
 
         # receive packet
-        packet = self.sock.recvfrom(64000 + header_len)[0]
+        packet = self.sock.recvfrom(MTU + header_len)[0]
         self.last_pkt_recvd = struct.unpack('!BBBBHHLLQQLL', packet[:header_len]) # read header
         payload = packet[header_len:header_len+self.last_pkt_recvd[11]]  # extract payload
 
@@ -231,10 +254,10 @@ class socket:
                                            source_port, dest_port, sequence_no, ack_no, window, payload_len)
 
         if self.amServer == True:
-            ACK = self.sock.sendto(ACK, self.client_addr)
+            self.sock.sendto(ACK, self.client_addr)
         elif self.amServer == False:
-            ACK = self.sock.sendto(ACK, self.serv_addr)
-        print("%i byte payload received. Sending ACK..." % nbytes)
+            self.sock.sendto(ACK, self.serv_addr)
+        print("%i byte payload received. SEQNO = %d. Sending ACK..." % (nbytes, ack_no))
 
         # TODO implement timers
         return payload
