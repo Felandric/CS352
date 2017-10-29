@@ -152,16 +152,24 @@ class socket:
         connection_response = self.udpPkt_hdr_data.pack(version, flags, opt_ptr, protocol, header_len, checksum,
                                                         source_port, dest_port, sequence_no, ack_no, window,
                                                         payload_len)
-        if self.amServer == True:
-            self.sock.sendto(connection_response, self.client_addr)
-        elif self.amServer == False:
-            self.sock.sendto(connection_response, self.serv_addr)
-        print("Termination request sent")
-
-        #TODO start timeout
+                                                        
+        acked = False
+        while not acked:
+            try:
+                if self.amServer == True:
+                    self.sock.sendto(connection_response, self.client_addr)
+                elif self.amServer == False:
+                    self.sock.sendto(connection_response, self.serv_addr)
+                print("Termination request sent")
+                ack = self.sock.recvfrom(header_len)[0]
+                acked = True
+            except syssock.timeout:
+                print("Timeout occurred. Resending...")
+                pass                                           
+        
 
         # Receive FIN ACK
-        FIN_ACK = struct.unpack('!BBBBHHLLQQLL', self.sock.recvfrom(header_len)[0])
+        FIN_ACK = struct.unpack('!BBBBHHLLQQLL', ack)
         if FIN_ACK[1] == SOCK352_FIN:
             flags |= SOCK352_ACK
             self.sock.close()
