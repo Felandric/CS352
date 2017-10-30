@@ -239,7 +239,7 @@ class socket:
                 
         return bytessent # subtract header size
 
-    def recv(self, nbytes):  # TODO implement fragmentation handling
+    def recv(self, nbytes):
         header_len = struct.calcsize('!BBBBHHLLQQLL')
         payload = ''
         payload_len = nbytes
@@ -283,5 +283,4 @@ class socket:
                 payload = payload + self.recv(payload_len)
                 bytes_to_recv = bytes_to_recv - payload_len 
 
-        # TODO implement timers
         return payload
