@@ -16,7 +16,7 @@ SOCK352_ACK = 0x04
 SOCK352_RESET = 0x08
 SOCK352_HAS_OPT = 0xA0
 
-MTU = 64000
+MTU = 256
 
 def init(udpportTx, udpportRx):
     global Txport                 # transmitting port
@@ -179,6 +179,9 @@ class socket:
         return
 
     def send(self, buffer):
+        if len(buffer) == 0:
+            return 0
+        
         version = 0x1
         flags = 0
         opt_ptr = 0
@@ -228,7 +231,10 @@ class socket:
 
         else: # this is very easy when done with recursion but does it screw up the sequence numbers?
             payload_len = len(buffer) % MTU
+            print(len(buffer))
+            print(payload_len)
             bytessent = bytessent + self.send(buffer[:payload_len])
+            bytes_to_send = bytes_to_send - bytessent
             payload_len = MTU
             while bytes_to_send > 0:
                 bytessent = bytessent + self.send(buffer[bytessent:bytessent+payload_len])
@@ -238,12 +244,26 @@ class socket:
 
     def recv(self, nbytes):  # TODO implement fragmentation handling
         header_len = struct.calcsize('!BBBBHHLLQQLL')
-
+        payload = ''
+        payload_len = nbytes
         # receive packet
-        packet = self.sock.recvfrom(MTU + header_len)[0]
-        self.last_pkt_recvd = struct.unpack('!BBBBHHLLQQLL', packet[:header_len]) # read header
-        payload = packet[header_len:header_len+self.last_pkt_recvd[11]]  # extract payload
-
+        if (nbytes <= MTU):
+            packet = self.sock.recvfrom(nbytes + header_len)[0]
+            self.last_pkt_recvd = struct.unpack('!BBBBHHLLQQLL', packet[:header_len]) # read header
+            payload = packet[header_len:header_len+self.last_pkt_recvd[11]]  # extract payload
+        else:
+            bytes_to_recv = nbytes
+            payload_len = nbytes % MTU
+            if payload_len == 0:
+                payload_len = MTU
+            payload = payload + self.recv(payload_len)
+            bytes_to_recv = bytes_to_recv - payload_len
+            payload_len = MTU
+            while bytes_to_recv > 0:
+                payload = payload + self.recv(payload_len)
+                bytes_to_recv = bytes_to_recv - payload_len
+                
+        
         # send ACK
         version = 0x1
         flags = SOCK352_ACK
@@ -256,8 +276,11 @@ class socket:
         sequence_no = self.last_pkt_recvd[8] + 1
         ack_no = self.last_pkt_recvd[8]
         window = 0
+        
+        print("%i byte payload received. SEQNO = %d. Sending ACK..." % (payload_len, ack_no))
+        
         payload_len = header_len
-
+        
         ACK = self.udpPkt_hdr_data.pack(version, flags, opt_ptr, protocol, header_len, checksum,
                                            source_port, dest_port, sequence_no, ack_no, window, payload_len)
 
@@ -265,7 +288,7 @@ class socket:
             self.sock.sendto(ACK, self.client_addr)
         elif self.amServer == False:
             self.sock.sendto(ACK, self.serv_addr)
-        print("%i byte payload received. SEQNO = %d. Sending ACK..." % (nbytes, ack_no))
+        
 
         # TODO implement timers
         return payload
