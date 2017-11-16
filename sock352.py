@@ -6,9 +6,33 @@ import sys
 import random
 import time
 
+import nacl.utils
+import nacl.secret
+import nacl.utils
+from nacl.public import PrivateKey, Box
+
 # these functions are global to the class and
 # define the UDP ports all messages are sent
 # and received from
+
+# the public and private keychains in hex format
+global publicKeysHex
+global privateKeysHex
+
+# the public and private keychains in binary format
+global publicKeys
+global privateKeys
+
+# the encryption flag
+global ENCRYPT
+
+publicKeysHex = {}
+privateKeysHex = {}
+publicKeys = {}
+privateKeys = {}
+
+# this is 0xEC
+ENCRYPT = 236
 
 SOCK352_SYN = 0x01
 SOCK352_FIN = 0x02
@@ -31,6 +55,38 @@ def init(udpportTx, udpportRx):
     Txport = udpportTx
     Rxport = udpportRx
 
+
+def readKeyChain(filename):
+    global publicKeysHex
+    global privateKeysHex
+    global publicKeys
+    global privateKeys
+
+    if (filename):
+        try:
+            keyfile_fd = open(filename, "r")
+            for line in keyfile_fd:
+                words = line.split()
+                # check if a comment
+                # more than 2 words, and the first word does not have a
+                # hash, we may have a valid host/key pair in the keychain
+                if ((len(words) >= 4) and (words[0].find("#") == -1)):
+                    host = words[1]
+                    port = words[2]
+                    keyInHex = words[3]
+                    if (words[0] == "private"):
+                        privateKeysHex[(host, port)] = keyInHex
+                        privateKeys[(host, port)] = nacl.public.PrivateKey(keyInHex, nacl.encoding.HexEncoder)
+                    elif (words[0] == "public"):
+                        publicKeysHex[(host, port)] = keyInHex
+                        publicKeys[(host, port)] = nacl.public.PublicKey(keyInHex, nacl.encoding.HexEncoder)
+        except Exception, e:
+            print ("error: opening keychain file: %s %s" % (filename, repr(e)))
+    else:
+        print ("error: No filename presented")
+
+    return (publicKeys, privateKeys)
+
 class socket:
 
     def __init__(self):
@@ -41,24 +97,37 @@ class socket:
         self.isConnected = False
         self.udpPkt_hdr_data = struct.Struct('!BBBBHHLLQQLL')
         self.amServer = None
+        self.isEncrypted = False
+        self.box = None
         return
 
     def bind(self, address):    # server call, address is a 2-tuple of (IP address, port number)
         self.sock.bind((address[0], int(Rxport)))           # establish receiving port
         return
 
-    def connect(self, address):     # client call, address is a 2-tuple of (IP address, port number)
+    def connect(self, *args):     # client call, address is a 2-tuple of (IP address, port number)
         self.amServer = False
         self.sock.settimeout(0.2)
-                
+        address = args[0]
+
         # Call Bind()
         self.serv_addr = (address[0], int(Rxport))
         self.sock.bind(('', int(Txport)))
 
+        if len(args) >= 2:
+            if args[1] == ENCRYPT:
+                self.isEncrypted = True
+                client_private_key = privateKeys[address]
+                server_public_key = publicKeys[address]
+                self.box = Box(client_private_key, server_public_key)
+                opt_ptr = 0b1
+        else:
+            opt_ptr = 0b0
+
         # Create SYN Header
         version = 0x1
         flags = SOCK352_SYN
-        opt_ptr = 0
+        #opt_ptr = 0
         protocol = 0
         header_len = struct.calcsize('!BBBBHHLLQQLL')
         checksum = 0
@@ -99,14 +168,24 @@ class socket:
     def listen(self, backlog):  # server call
         return
 
-    def accept(self):  # server call
+    def accept(self, *args):  # server call
         self.amServer = True
         self.sock.settimeout(None)
-        
+
         # Receive the SYN Packet (A)
         header_len = struct.calcsize('!BBBBHHLLQQLL')
         
         SYN_Packet, self.client_addr = self.sock.recvfrom(int(header_len))
+
+        if len(args) > 0:
+            if args[0] == ENCRYPT:
+                self.isEncrypted = True
+                server_private_key = privateKeys[self.client_addr]
+                client_public_key = publicKeys[self.client_addr]
+                self.box = Box(server_private_key, client_public_key)
+                opt_ptr = 0b1
+        else:
+            opt_ptr = 0b0
 
         self.last_pkt_recvd = struct.unpack('!BBBBHHLLQQLL', SYN_Packet)
         print("Connection request received")
@@ -119,7 +198,7 @@ class socket:
         else:
             flags = SOCK352_SYN | SOCK352_ACK
             self.isConnected = True
-        opt_ptr = 0
+        #opt_ptr = 0
         protocol = 0
         header_len = struct.calcsize('!BBBBHHLLQQLL')
         checksum = 0
@@ -244,7 +323,7 @@ class socket:
         payload = ''
         payload_len = nbytes
         # receive packet
-        if (nbytes <= MTU):
+        if nbytes <= MTU:
             packet = self.sock.recvfrom(nbytes + header_len)[0]
             self.last_pkt_recvd = struct.unpack('!BBBBHHLLQQLL', packet[:header_len]) # read header
             payload = packet[header_len:header_len+self.last_pkt_recvd[11]]  # extract payload
