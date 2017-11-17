@@ -117,8 +117,8 @@ class socket:
         if len(args) >= 2:
             if args[1] == ENCRYPT:
                 self.isEncrypted = True
-                client_private_key = privateKeys[address]
-                server_public_key = publicKeys[address]
+                client_private_key = privateKeys[('*', '*')]
+                server_public_key = publicKeys[(str(address[0]), str(address[1]))]
                 self.box = Box(client_private_key, server_public_key)
                 opt_ptr = 0b1
         else:
