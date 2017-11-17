@@ -73,7 +73,7 @@ def main():
     
     # send the size of the file as a 4 byte integer
     # to the server, so it knows how much to read
-    FRAGMENTSIZE = 4096#8192
+    FRAGMENTSIZE = 8192
     longPacker = struct.Struct("!L")
     fileLenPacked = longPacker.pack(filesize);
     s.send(fileLenPacked)

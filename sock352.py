@@ -118,7 +118,7 @@ class socket:
             if args[1] == ENCRYPT:
                 self.isEncrypted = True
                 client_private_key = privateKeys[('*', '*')]
-                server_public_key = publicKeys[(str(address[0]), str(address[1]))]
+                server_public_key = publicKeys[(self.serv_addr[0], str(self.serv_addr[1]))]
                 self.box = Box(client_private_key, server_public_key)
                 opt_ptr = 0b1
         else:
@@ -176,12 +176,14 @@ class socket:
         header_len = struct.calcsize('!BBBBHHLLQQLL')
         
         SYN_Packet, self.client_addr = self.sock.recvfrom(int(header_len))
+        if self.client_addr[0] == '127.0.0.1':
+            self.client_addr = ('localhost', self.client_addr[1])
 
         if len(args) > 0:
             if args[0] == ENCRYPT:
                 self.isEncrypted = True
-                server_private_key = privateKeys[self.client_addr]
-                client_public_key = publicKeys[self.client_addr]
+                server_private_key = privateKeys[('*', '*')]
+                client_public_key = publicKeys[(self.client_addr[0], str(self.client_addr[1]))]
                 self.box = Box(server_private_key, client_public_key)
                 opt_ptr = 0b1
         else:
