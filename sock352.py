@@ -111,8 +111,8 @@ class socket:
         address = args[0]
 
         # Call Bind()
-        self.serv_addr = (address[0], int(Rxport))
-        self.sock.bind(('', int(Txport)))
+        self.serv_addr = (address[0], int(Txport))  # changed from Rx
+        self.sock.bind(('', int(Rxport)))  # changed from Tx
 
         if len(args) >= 2:
             if args[1] == ENCRYPT:
@@ -147,22 +147,25 @@ class socket:
         while not acked:
             try:
                 self.sock.sendto(SYN_Packet, self.serv_addr)
-                print("Connection request sent")
+                #print("Connection request sent")
                 ack = self.sock.recvfrom(header_len)[0]
                 acked = True
             except syssock.timeout:
-                print("Timeout occurred. Resending...")
+                #print("Timeout occurred. Resending...")
                 pass
         
         # Receive SYN ACK (B)
         self.last_pkt_recvd = struct.unpack('!BBBBHHLLQQLL', ack)
-        print("Server response received")
+        #print("Server response received")
         if self.last_pkt_recvd [1] == SOCK352_RESET:
-            print("Connection Refused")
+            #print("Connection Refused")
+            pass
         elif self.last_pkt_recvd [1] == SOCK352_SYN | SOCK352_ACK:
-            print("Connection Successful")
+            #print("Connection Successful")
+            pass
         else:
-            print("Server response invalid")
+            #print("Server response invalid")
+            pass
         return
 
     def listen(self, backlog):  # server call
@@ -190,7 +193,7 @@ class socket:
             opt_ptr = 0b0
 
         self.last_pkt_recvd = struct.unpack('!BBBBHHLLQQLL', SYN_Packet)
-        print("Connection request received")
+        #print("Connection request received")
 
         # Send SYN ACK (B)
         version = 0x1
@@ -213,7 +216,7 @@ class socket:
         connection_response = self.udpPkt_hdr_data.pack(version, flags, opt_ptr, protocol, header_len, checksum,
                                                         source_port, dest_port, sequence_no, ack_no, window, payload_len)
         self.sock.sendto(connection_response, self.client_addr)  # send initial packet over the connection
-        print("Server response sent")
+        #print("Server response sent")
         return self, self.client_addr
 
     def close(self):
@@ -241,11 +244,11 @@ class socket:
                     self.sock.sendto(connection_response, self.client_addr)
                 elif self.amServer == False:
                     self.sock.sendto(connection_response, self.serv_addr)
-                print("Termination request sent")
+                #print("Termination request sent")
                 ack = self.sock.recvfrom(header_len)[0]
                 acked = True
             except syssock.timeout:
-                print("Timeout occurred. Resending...")
+                #print("Timeout occurred. Resending...")
                 pass                                           
         
 
@@ -254,14 +257,17 @@ class socket:
         if FIN_ACK[1] == SOCK352_FIN:
             flags |= SOCK352_ACK
             self.sock.close()
-            print("Connection terminated")
+            #print("Connection terminated")
         else:
-            print("Server response invalid")
+            #print("Server response invalid")
+            pass
         return
 
     def send(self, buffer):
         if len(buffer) == 0:
             return 0
+
+        buffer = buffer[:4000]  # added to solve fragmentation problem
         
         version = 0x1
         flags = 0
@@ -294,19 +300,21 @@ class socket:
                         bytessent = self.sock.sendto((header + buffer), self.client_addr)
                     elif self.amServer == False:
                         bytessent = self.sock.sendto((header + buffer), self.serv_addr)
-                    print("%i byte payload sent. SEQNO = %d. Awaiting ACK..." % (len(buffer), sequence_no))
+                    #print("%i byte payload sent. SEQNO = %d. Awaiting ACK..." % (len(buffer), sequence_no))
                     ack = self.sock.recvfrom(header_len)[0]
                     acked = True
                 except syssock.timeout:
-                    print("Timeout occurred. Resending...")
+                    #print("Timeout occurred. Resending...")
                     pass
 
             # receive ACK
             self.last_pkt_recvd = struct.unpack('!BBBBHHLLQQLL', ack)
             if (self.last_pkt_recvd[1] == SOCK352_ACK) and (self.last_pkt_recvd[9] == sequence_no):
-                print("ACK received")
+                #print("ACK received")
+                pass
             else:
-                print("Response invalid")
+                #print("Response invalid")
+                pass
             bytessent = bytessent - header_len
 
         else: # this is very easy when done with recursion but does it screw up the sequence numbers?
@@ -342,7 +350,7 @@ class socket:
             ack_no = self.last_pkt_recvd[8]
             window = 0
             
-            print("%i byte payload received. SEQNO = %d. Sending ACK..." % (payload_len, ack_no))
+            #print("%i byte payload received. SEQNO = %d. Sending ACK..." % (payload_len, ack_no))
             
             payload_len = header_len
             

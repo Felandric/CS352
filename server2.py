@@ -68,7 +68,7 @@ def main():
     s = sock352.socket()
 
     # set the fragment size we will read on 
-    FRAGMENTSIZE = 8192#4096
+    FRAGMENTSIZE = 4096
 
     # binding the host to empty allows reception on
     # all network interfaces
