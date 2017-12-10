@@ -97,9 +97,16 @@ class socket:
         self.isConnected = False
         self.udpPkt_hdr_data = struct.Struct('!BBBBHHLLQQLL')
         self.amServer = None
+
+        #PART 2
         self.isEncrypted = False
         self.box = None
         self.nonce_flag = 0
+
+        #PART 3
+        self.window_size = 32000
+        self.buffer = bytearray(32000)
+
         return
 
     def bind(self, address):    # server call, address is a 2-tuple of (IP address, port number)
@@ -163,6 +170,7 @@ class socket:
             pass
         elif self.last_pkt_recvd [1] == SOCK352_SYN | SOCK352_ACK:
             #print("Connection Successful")
+            self.window_size = 32000 # PART 3
             pass
         else:
             #print("Server response invalid")
@@ -212,10 +220,10 @@ class socket:
         dest_port = 0
         sequence_no = self.last_pkt_recvd[8] + 1
         ack_no = 0
-        window = 0
+        window = 32000
         payload_len = 0
         connection_response = self.udpPkt_hdr_data.pack(version, flags, opt_ptr, protocol, header_len, checksum,
-                                                        source_port, dest_port, sequence_no, ack_no, window, payload_len)
+                                                    source_port, dest_port, sequence_no, ack_no, window, payload_len)
         self.sock.sendto(connection_response, self.client_addr)  # send initial packet over the connection
         #print("Server response sent")
         return self, self.client_addr
@@ -298,46 +306,45 @@ class socket:
 
         bytes_to_send = len(buffer)
         bytessent = 0
-        if len(buffer) <= MTU:
-            # packs header data into a string suitable to be sent over transmitting socket
-            header = self.udpPkt_hdr_data.pack(version, flags, opt_ptr, protocol, header_len, checksum,
-                                               source_port, dest_port, sequence_no, ack_no, window, payload_len)
 
-                                               
-            # resend packets if timeout occurs while waiting for ack
-            acked = False
-            while not acked:
-                try:
-                    if self.amServer == True:
-                        bytessent = self.sock.sendto((header + buffer), self.client_addr)
-                    elif self.amServer == False:
-                          bytessent = self.sock.sendto((header + buffer), self.serv_addr)
-                    #print("%i byte payload sent. SEQNO = %d. Awaiting ACK..." % (len(buffer), sequence_no))
-                    ack = self.sock.recvfrom(header_len)[0]
-                    acked = True
-                except syssock.timeout:
-                    #print("Timeout occurred. Resending...")
-                    pass
+        # packs header data into a string suitable to be sent over transmitting socket
+        header = self.udpPkt_hdr_data.pack(version, flags, opt_ptr, protocol, header_len, checksum,
+                                           source_port, dest_port, sequence_no, ack_no, window, payload_len)
 
-            # receive ACK
-            self.last_pkt_recvd = struct.unpack('!BBBBHHLLQQLL', ack)
-            if (self.last_pkt_recvd[1] == SOCK352_ACK) and (self.last_pkt_recvd[9] == sequence_no):
-                #print("ACK received")
+        # PART 3, block while there is not enough space in the queue
+        queue_update = None
+        while self.window_size < len(buffer):
+            self.last_pkt_recvd = self.sock.recvfrom(header_len)[0]
+            self.last_pkt_recvd = struct.unpack('!BBBBHHLLQQLL', queue_update)
+            self.window_size = queue_update[10]
+            print(self.window_size)
+
+        # resend packets if timeout occurs while waiting for ack
+        acked = False
+        while not acked:
+            try:
+                if self.amServer == True:
+                    bytessent = self.sock.sendto((header + buffer), self.client_addr)
+                elif self.amServer == False:
+                    bytessent = self.sock.sendto((header + buffer), self.serv_addr)
+                #print("%i byte payload sent. SEQNO = %d. Awaiting ACK..." % (len(buffer), sequence_no))
+                ack = self.sock.recvfrom(header_len)[0]
+                acked = True
+            except syssock.timeout:
+                #print("Timeout occurred. Resending...")
                 pass
-            else:
-                #print("Response invalid")
-                pass
-            bytessent = bytessent - header_len
 
-        else: # this is very easy when done with recursion but does it screw up the sequence numbers?
-            payload_len = len(buffer) % MTU
-            bytessent = bytessent + self.send(buffer[:payload_len])
-            bytes_to_send = bytes_to_send - bytessent
-            payload_len = MTU
-            while bytes_to_send > 0:
-                bytessent = bytessent + self.send(buffer[bytessent:bytessent+payload_len])
-                bytes_to_send = bytes_to_send - payload_len
-                
+        # receive ACK
+        self.last_pkt_recvd = struct.unpack('!BBBBHHLLQQLL', ack)
+        if (self.last_pkt_recvd[1] == SOCK352_ACK) and (self.last_pkt_recvd[9] == sequence_no):
+            #print("ACK received")
+            self.window_size = self.last_pkt_recvd[10] # PART 3, update window size
+            print("%i byte payload sent. Buffer occupancy: %i" % (bytessent, 32000-self.window_size))
+            pass
+        else:
+            #print("Response invalid")
+            pass
+        bytessent = bytessent - header_len
 
         if self.isEncrypted == True:
             bytessent -= 40
@@ -345,6 +352,20 @@ class socket:
         return bytessent # subtract header size
 
     def recv(self, nbytes):
+
+        # PART 3, check buffer for bytes before receiving more
+        ''' # this doesn't work
+        if nbytes < 32000 - self.window_size:
+            bytes_read = self.buffer[0:nbytes]
+            self.buffer[0:nbytes] = []
+            self.window_size += nbytes
+            print("Buffer occupancy: %i, read size: %i" % (32000-self.window_size, nbytes))
+            # send ack with updated window size
+            ACK = self.udpPkt_hdr_data.pack(0x1, SOCK352_ACK, 0, 0, struct.calcsize('!BBBBHHLLQQLL'), 0,
+                                            0, 0, self.last_pkt_recvd[8]+1, self.last_pkt_recvd[8], self.window_size, 0)
+            self.sock.sendto(ACK, self.client_addr)
+            return bytes_read
+        '''
 
         if self.isEncrypted == True:
             nbytes += 40
@@ -355,7 +376,8 @@ class socket:
         # receive packet
         if nbytes <= MTU:
 
-            packet = self.sock.recvfrom(nbytes + header_len)[0]
+            #packet = self.sock.recvfrom(nbytes + header_len)[0]
+            packet = self.sock.recvfrom(8192 + header_len)[0]        # PART 3, MAX packet size sent by client
 
             self.last_pkt_recvd = struct.unpack('!BBBBHHLLQQLL', packet[:header_len]) # read header
             payload = packet[header_len:header_len+self.last_pkt_recvd[11]]  # extract payload
@@ -363,8 +385,15 @@ class socket:
             if self.isEncrypted == True:
                 payload = self.box.decrypt(payload)
                 opt_ptr = 0b1
+                nbytes -=40
             else:
                 opt_ptr = 0b0
+
+            #PART 3
+            for c in payload:
+                self.buffer.append(c)
+            print("Buffer occupancy: %i, payload length: %i, read size: %i" % (32000-self.window_size, len(payload), nbytes))
+            self.window_size = self.window_size - len(payload) + nbytes
 
             # send ACK
             version = 0x1
@@ -377,12 +406,12 @@ class socket:
             dest_port = 0
             sequence_no = self.last_pkt_recvd[8] + 1
             ack_no = self.last_pkt_recvd[8]
-            window = 0
-            
+            window =  self.window_size
+
             #print("%i byte payload received. SEQNO = %d. Sending ACK..." % (payload_len, ack_no))
-            
+
             payload_len = header_len
-            
+
             ACK = self.udpPkt_hdr_data.pack(version, flags, opt_ptr, protocol, header_len, checksum,
                                                source_port, dest_port, sequence_no, ack_no, window, payload_len)
             if self.amServer == True:
@@ -399,6 +428,10 @@ class socket:
             payload_len = MTU
             while bytes_to_recv > 0:
                 payload = payload + self.recv(payload_len)
-                bytes_to_recv = bytes_to_recv - payload_len 
+                bytes_to_recv = bytes_to_recv - payload_len
+
+        # PART 3
+        bytes_read = self.buffer[0:nbytes]
+        self.buffer[0:nbytes] = []
 
         return payload
