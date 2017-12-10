@@ -4,6 +4,7 @@ import socket as syssock
 import struct
 import sys
 import random
+import errno
 
 import nacl.utils
 import nacl.secret
@@ -108,7 +109,7 @@ class socket:
         #PART 3
         self.window_size = 32000
         self.buffer = bytearray(32000)
-
+        self.buffer_index = 0
         return
 
     def bind(self, address):    # server call, address is a 2-tuple of (IP address, port number)
@@ -231,6 +232,7 @@ class socket:
         return self, self.client_addr
 
     def close(self):
+        self.sock.settimeout(0.2)
         # Send FIN Packet
         version = 0x1
         flags = SOCK352_FIN
@@ -248,6 +250,7 @@ class socket:
                                                         source_port, dest_port, sequence_no, ack_no, window,
                                                         payload_len)
                                                         
+        ack = None
         acked = False
         while not acked:
             try:
@@ -261,17 +264,24 @@ class socket:
             except syssock.timeout:
                 #print("Timeout occurred. Resending...")
                 pass                                           
-        
-
+            except syssock.error as error:
+                if error.errno == 10054:
+                    break
+                else:
+                    raise
+       
         # Receive FIN ACK
-        FIN_ACK = struct.unpack('!BBBBHHLLQQLL', ack)
-        if FIN_ACK[1] == SOCK352_FIN:
-            flags |= SOCK352_ACK
-            self.sock.close()
-            #print("Connection terminated")
+        if (ack != None):
+            FIN_ACK = struct.unpack('!BBBBHHLLQQLL', ack)
+            if FIN_ACK[1] == SOCK352_FIN:
+                flags |= SOCK352_ACK
+                self.sock.close()
+                #print("Connection terminated")
+            else:
+                #print("Server response invalid")
+                pass
         else:
-            #print("Server response invalid")
-            pass
+            self.sock.close()
         return
 
     #this 🅱oesn't 🅱ork
@@ -358,62 +368,64 @@ class socket:
     def recv(self, nbytes):
         header_len = struct.calcsize('!BBBBHHLLQQLL')
         print("%i B requested." %(nbytes)),
-
+        
         # receive client request for window size
         update = self.sock.recvfrom(header_len)[0]
-        #print("Window size request received")
-
-        # respond with current window size
-        update = self.udpPkt_hdr_data.pack(0x1, 0, 0, 0, header_len, 0, 0, 0, 0, 0, self.window_size, 0)
-        self.sock.sendto(update, self.client_addr)
-        #print("Response sent. Window Size: %i B" % (self.window_size))
-
-        # await sender response on whether they can send, or to read from buffer as is
-        update = self.sock.recvfrom(header_len)[0]
         self.last_pkt_recvd = struct.unpack('!BBBBHHLLQQLL', update)
-        if self.last_pkt_recvd[1] == SOCK352_BUFFER_FULL:
-            bytes_read = self.buffer[0:nbytes]
-            self.window_size -= nbytes
-            print("Window size: %i B. Send too large. Reading from buffer..." %(self.window_size)),
-            return bytes_read
+        if (self.last_pkt_recvd[1] != SOCK352_FIN):
+        
+            #print("Window size request received")
+            # respond with current window size
+            update = self.udpPkt_hdr_data.pack(0x1, 0, 0, 0, header_len, 0, 0, 0, 0, 0, self.window_size, 0)
+            self.sock.sendto(update, self.client_addr)
+            #print("Response sent. Window Size: %i B" % (self.window_size))
 
-        # PART 2 CODE
-        if self.isEncrypted == True:
-            nbytes += 40
+            # await sender response on whether they can send, or to read from buffer as is
+            update = self.sock.recvfrom(header_len)[0]
+            self.last_pkt_recvd = struct.unpack('!BBBBHHLLQQLL', update)
+            if self.last_pkt_recvd[1] == SOCK352_BUFFER_FULL:
+                bytes_read = self.buffer[0:nbytes]
+                self.window_size -= nbytes
+                print("Window size: %i B. Send too large. Reading from buffer..." %(self.window_size)),
+                return bytes_read
 
-        header_len = struct.calcsize('!BBBBHHLLQQLL')
-        # receive packet
+            # PART 2 CODE
+            if self.isEncrypted == True:
+                nbytes += 40
 
-        #packet = self.sock.recvfrom(nbytes + header_len)[0]
-        packet = self.sock.recvfrom(8192 + header_len)[0]        # PART 3, MAX packet size sent by client
+            header_len = struct.calcsize('!BBBBHHLLQQLL')
+            # receive packet
+            
+            packet = self.sock.recvfrom(8192 + header_len)[0]        # PART 3, MAX packet size sent by client
+            
+            self.last_pkt_recvd = struct.unpack('!BBBBHHLLQQLL', packet[:header_len]) # read header
+            payload = packet[header_len:header_len+self.last_pkt_recvd[11]]  # extract payload
 
-        self.last_pkt_recvd = struct.unpack('!BBBBHHLLQQLL', packet[:header_len]) # read header
-        payload = packet[header_len:header_len+self.last_pkt_recvd[11]]  # extract payload
+            if self.isEncrypted == True:
+                payload = self.box.decrypt(payload)
+                opt_ptr = 0b1
+                nbytes -=40
+            else:
+                opt_ptr = 0b0
 
-        if self.isEncrypted == True:
-            payload = self.box.decrypt(payload)
-            opt_ptr = 0b1
-            nbytes -=40
-        else:
-            opt_ptr = 0b0
-
-        #PART 3
-        for c in payload:
-            self.buffer.append(c)
-        #print("Buffer occupancy: %i, payload length: %i, read size: %i" % (32000-self.window_size, len(payload), nbytes))
-        self.window_size = self.window_size - len(payload) + nbytes
-
-        # send ACK
-        # print("%i byte payload received. SEQNO = %d. Sending ACK..." % (payload_len, ack_no))
-        sequence_no = self.last_pkt_recvd[8] + 1
-        ack_no = self.last_pkt_recvd[8]
-        window =  self.window_size
-        payload_len = header_len
-        ACK = self.udpPkt_hdr_data.pack(0x1, SOCK352_ACK, opt_ptr, 0, header_len, 0, 0, 0, sequence_no, ack_no, window, payload_len)
-        self.sock.sendto(ACK, self.client_addr)
-
+            #PART 3
+            #insert data into buffer and increment buffer index
+            self.buffer[self.buffer_index:self.buffer_index + self.last_pkt_recvd[11]] = payload
+            self.buffer_index += self.last_pkt_recvd[11]
+            #print("Buffer occupancy: %i, payload length: %i, read size: %i" % (32000-self.window_size, len(payload), nbytes))
+            self.window_size = self.window_size - len(payload) + nbytes
+            # send ACK
+            # print("%i byte payload received. SEQNO = %d. Sending ACK..." % (payload_len, ack_no))
+            sequence_no = self.last_pkt_recvd[8] + 1
+            ack_no = self.last_pkt_recvd[8]
+            window =  self.window_size
+            payload_len = header_len
+            ACK = self.udpPkt_hdr_data.pack(0x1, SOCK352_ACK, opt_ptr, 0, header_len, 0, 0, 0, sequence_no, ack_no, window, payload_len)
+            self.sock.sendto(ACK, self.client_addr)
+        
         # PART 3
         bytes_read = self.buffer[0:nbytes]
         self.buffer[0:nbytes] = []
+        self.buffer_index -= nbytes
         print("%i B read" %(nbytes))
-        return bytes_read
+        return str(bytes_read)
